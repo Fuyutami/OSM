@@ -16,7 +16,7 @@ class SelectPieMenu(Menu):
         icon_scroll = pcoll["icon_scroll"]
         pie = layout.menu_pie()
         pie.operator("wm.save_mainfile", text="Save", icon='FILE_TICK')
-        # add following operators only if there is a selected object
+
 
         if bpy.context.selected_objects and bpy.context.mode == 'OBJECT':
             if len(bpy.context.selected_objects) == 1:
@@ -53,7 +53,6 @@ def unregister():
             if kmi.idname == 'wm.call_menu_pie' and kmi.properties.name == "OBJECT_MT_select_pie_menu":
                 km.keymap_items.remove(kmi)
                 break
-
     for pcoll in preview_collections.values():
         bpy.utils.previews.remove(pcoll)
     preview_collections.clear()
