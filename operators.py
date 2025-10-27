@@ -1,130 +1,9 @@
 import bpy
-import blf
-import bgl
-import uuid
-import gpu
-from gpu_extras.batch import batch_for_shader
+from . utils import generate_ID
+from . draw import draw_object_info
 
-
-def get_collection(obj_name):
-    obj_collection_name = obj_name + " (backup)"
-    if "BACKUP" not in bpy.data.collections:
-        new_collection = bpy.data.collections.new("BACKUP")
-        new_collection.color_tag = "COLOR_05"
-        bpy.context.scene.collection.children.link(new_collection)
-        
-        
-    if obj_collection_name not in bpy.data.collections["BACKUP"].children:
-        new_collection = bpy.data.collections.new(obj_collection_name)
-        new_collection.color_tag = "COLOR_05"
-        bpy.data.collections.get("BACKUP").children.link(new_collection)
-    return bpy.data.collections["BACKUP"].children[obj_collection_name]
-
-
-def generate_ID():
-    return str(uuid.uuid4())
-
-def draw_callback_px(self, context):
-    obj = context.active_object
-    font_id = 0
-    # Draw rectangle
-     # Enable blending using the new `gpu.state` API
-    gpu.state.blend_set('ALPHA')
-
-    # Create the shader
-    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-    
-    # Define the vertices and indices for a rectangle
-    vertices = [(50, 150), (200, 150), (200, 30), (50, 30)]
-    indices = [(0, 1, 2), (2, 3, 0)]
-    
-    # Create a batch for the shader
-    batch = batch_for_shader(shader, 'TRIS', {"pos": vertices}, indices=indices)
-
-    # Bind the shader and set the color with alpha (transparency)
-    shader.bind()
-    shader.uniform_float("color", (0.0, 0.0, 0.0, 0.5))  # Red with 50% transparency
-    
-    # Draw the batch (the rectangle)
-    batch.draw(shader)
-    
-    # Reset blending to default
-    gpu.state.blend_set('NONE')
-
-    # Set the color (white)
-    blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
-    # Set the size
-    blf.size(font_id, 15)
-
-    # Enable shadow
-    blf.enable(font_id, blf.SHADOW)
-    blf.shadow(font_id, 3, 0, 0, 0, 0.7)
-    blf.shadow_offset(font_id, 2, -2)
-
-    # Set the position
-    blf.position(font_id, 70, 120, 0)
-    # Draw the text
-    blf.draw(font_id, "INFO")
-
-    # draw vertices
-    vertices = len(obj.data.vertices)
-    evaluated_object = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-    vertices_after_mods = len(evaluated_object.data.vertices)
-    blf.position(font_id, 70, 90, 0)
-    blf.draw(font_id, "Vertices:    " + str(vertices) + " (" + str(vertices_after_mods) + ")")
-    # draw number of ngons
-    # polygons = obj.data.polygons
-    # ngon_count = sum(1 for poly in polygons if len(poly.vertices) > 4)
-    # blf.position(font_id, 70, 60, 0)
-    # blf.draw(font_id, "Ngons:   " + str(ngon_count))
-    #draw modifiers info
-    modifiers_list = ""
-    for mod in obj.modifiers:
-        if mod.show_viewport:
-            if mod.type == "BEVEL":
-                modifiers_list += mod.name + "[s" + str(mod.segments) + "]  "
-            elif mod.type == "SUBSURF":
-                modifiers_list += mod.name + "[lv" + str(mod.levels) + "]  "
-            else:
-                modifiers_list += mod.name + "  "
-    
-    blf.position(font_id, 70, 60, 0)
-    blf.draw(font_id, "Mods:    " + str(modifiers_list))
-
-
-    # draw controls
-    lines = ["CONTROLS", "Scroll:    Switch between states", "Left Click:    Recall object", "Right Click:    Cancel", "X: Delete visible state", "Delete: Delete all states"]
-    longest_line = max(lines, key=len)
-    width, height = blf.dimensions(font_id, longest_line)
-
-    # Get the width and height of the 3D Viewport region
-    area = next(area for area in bpy.context.screen.areas if area.type == 'VIEW_3D')
-    width_3d_viewport = area.width
-
-    # Calculate the X-coordinate from the right side of the 3D Viewport
-    x_coordinate = width_3d_viewport - width - 30
-
-    # Set the position of the text
-    y_offset = 15  # Initial y-coordinate
-    line_spacing = 30  # Adjust as needed
-
-    # Reverse the order of lines
-    lines.reverse()
-
-     # Draw the text
-    for line in lines:
-        y_coordinate = y_offset
-        blf.position(font_id, x_coordinate, y_coordinate, 0)
-        blf.draw(font_id, line)
-        y_offset += line_spacing
 
     
-
-
-
-        
-
-
 class BackupObject(bpy.types.Operator):
     """Backup the selected object"""
     bl_idname = "object.backup_object"
@@ -206,15 +85,23 @@ class StateScroll(bpy.types.Operator):
 
         if event.type == 'WHEELUPMOUSE':
             self.scroll(context, "UP")
-            self.report({'INFO'}, f"Scrolled up to state {self.current_state_index}")
+            
 
         if event.type == 'WHEELDOWNMOUSE':
             self.scroll(context, "DOWN")
-            self.report({'INFO'}, f"Scrolled down to state {self.current_state_index}")
+           
          
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
-            self.report({'INFO'}, f"number of states: {len(self.states)}")
+            self.revertState()
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+            bpy.context.space_data.overlay.show_wireframes = False
+            bpy.ops.object.select_all(action='DESELECT')
+            self.collection.objects.unlink(self.states[self.current_state_index])
+            self.collection.objects.link(self.states[len(self.states) - 1])
+            bpy.context.view_layer.objects.active = self.states[len(self.states) - 1]
+            self.states[len(self.states) - 1].select_set(True)
+            return {'FINISHED'}
 
         # allow orbiting around the object
         if event.type == 'MIDDLEMOUSE':
@@ -229,6 +116,10 @@ class StateScroll(bpy.types.Operator):
             self.collection.objects.link(self.states[len(self.states) - 1])
             bpy.context.view_layer.objects.active = self.states[len(self.states) - 1]
             self.states[len(self.states) - 1].select_set(True)
+            
+            
+            # refresh status bar
+            bpy.context.workspace.status_text_set("")
             return {'CANCELLED'}
 
         return {'RUNNING_MODAL'}
@@ -236,7 +127,7 @@ class StateScroll(bpy.types.Operator):
     def invoke(self, context, event):
         if context.area.type == 'VIEW_3D':
             args = (self, context)
-            self._handle = bpy.types.SpaceView3D.draw_handler_add(draw_callback_px, args, 'WINDOW', 'POST_PIXEL')
+            self._handle = bpy.types.SpaceView3D.draw_handler_add(draw_object_info, args, 'WINDOW', 'POST_PIXEL')
             context.window_manager.modal_handler_add(self)
 
             if(self.osm_id == None):
@@ -247,6 +138,8 @@ class StateScroll(bpy.types.Operator):
                     [obj for obj in bpy.data.objects if "osm_id" in obj and obj["osm_id"] == self.osm_id],
                     key=lambda x: x["stateID"]
                 )
+            
+            bpy.context.workspace.status_text_set("LMB - Recall state               SCROLL - Change state               RMB - Cancel                DEL - Delete state")    
 
             # Focus on the selected object
             bpy.ops.view3d.view_selected(use_all_regions=False)
@@ -276,8 +169,12 @@ class StateScroll(bpy.types.Operator):
         bpy.context.view_layer.objects.active = self.states[self.current_state_index]
         self.states[self.current_state_index].select_set(True)
     
-        
-
+    def revertState(self):
+        preferences = bpy.context.preferences.addons[__package__].preferences
+        dublicate_reverted_state = preferences.duplicate_reverted_state
+        save_state_on_revert = preferences.save_state_on_revert
+        self.report({'INFO'}, f"Reverting to state {self.current_state_index}, duplicate_reverted_state: {dublicate_reverted_state}, save_state_on_revert: {save_state_on_revert}")
+    
         
 
         
